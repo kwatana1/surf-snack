@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, deleteDoc, collection, onSnapshot, addDoc, updateDoc, arrayUnion, query, orderBy, limit, serverTimestamp } from 'firebase/firestore';
+import { GoogleGenerativeAI } from '@google/generative-ai';
 import { Wine, Waves, Users, MessageSquare, ChevronRight, Send, Loader2, Sparkles, Compass, MapPin, Plus, Calendar, Info, CheckCircle2, Edit3, Trash2, LogOut } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -14,57 +15,34 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
-let app, auth, db;
+let app, auth, db, genAI;
 try {
   app = initializeApp(firebaseConfig);
   auth = getAuth(app);
   db = getFirestore(app);
+  if (import.meta.env.VITE_GEMINI_API_KEY) {
+    genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
+  }
 } catch (e) {
   console.error("Firebase initialization error", e);
 }
 
-// --- Gemini API 共通呼び出し関数（AQ.新形式キー ＆ 従来キー両対応） ---
+// --- Gemini API 共通呼び出し関数（最新 gemini-2.5-flash 対応） ---
 async function generateMasterReply(systemPrompt, conversationText) {
-  const rawKey = import.meta.env.VITE_GEMINI_API_KEY;
-  if (!rawKey) {
-    throw new Error("Vercelの VITE_GEMINI_API_KEY が読み込めていません（VercelでRedeployしてください）");
+  if (!genAI) {
+    throw new Error("VITE_GEMINI_API_KEY is not set");
   }
-  const apiKey = rawKey.trim();
-  const modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash'];
+  const modelsToTry = ['gemini-2.5-flash', 'gemini-1.5-flash'];
   let lastError = null;
 
   for (const modelName of modelsToTry) {
     try {
-      const baseUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`;
-      const url = apiKey.startsWith('AIza') ? `${baseUrl}?key=${encodeURIComponent(apiKey)}` : baseUrl;
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': apiKey
-        },
-        body: JSON.stringify({
-          systemInstruction: {
-            parts: [{ text: systemPrompt }]
-          },
-          contents: [
-            {
-              role: 'user',
-              parts: [{ text: conversationText }]
-            }
-          ]
-        })
+      const model = genAI.getGenerativeModel({
+        model: modelName,
+        systemInstruction: systemPrompt
       });
-
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error?.message || `HTTP ${response.status}`);
-      }
-
-      const replyText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (replyText) return replyText;
-      throw new Error("空のレスポンスが返されました");
+      const result = await model.generateContent(conversationText);
+      return result.response.text();
     } catch (err) {
       console.warn(`Model ${modelName} failed:`, err);
       lastError = err;
@@ -203,7 +181,7 @@ function WelcomeScreen({ onNext }) {
           <input type="text" required maxLength={12} value={nickname} onChange={(e) => setNickname(e.target.value)} placeholder="例: ナミオ、ShonanBoy" className="w-full bg-stone-950 border border-stone-700 rounded-xl px-4 py-3.5 text-white placeholder-stone-600 focus:outline-none focus:border-teal-500 transition-colors" />
         </div>
         <button type="submit" className="w-full bg-teal-600 hover:bg-teal-500 text-white font-bold py-3.5 rounded-xl transition-all shadow-lg flex items-center justify-center space-x-2">
-          <span>マスターに挨拶する</span>
+          <span>入店する</span>
           <ChevronRight className="w-4 h-4" />
         </button>
       </form>
