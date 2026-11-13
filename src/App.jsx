@@ -24,7 +24,7 @@ try {
 }
 
 // --- Gemini API 共通呼び出し関数（gemini-3.8-flash & AQキー直接通信対応版） ---
-async function fetchWithTimeout(url, options, timeoutMs = 7000) {
+async function fetchWithTimeout(url, options, timeoutMs = 8000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -37,64 +37,88 @@ async function fetchWithTimeout(url, options, timeoutMs = 7000) {
   }
 }
 
-function buildFallbackMasterReply(systemPrompt, conversationText) {
-  const isFacilitator = systemPrompt.includes("ファシリテーター");
-  const lines = conversationText.trim().split("\n").filter(Boolean);
-  const lastLine = lines[lines.length - 1] || "";
+async function callGeminiModel(modelName, apiKey, systemPrompt, conversationText) {
+  const cleanName = modelName.replace(/^models\//, "");
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanName}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const response = await fetchWithTimeout(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      contents: [{ role: "user", parts: [{ text: conversationText }] }]
+    })
+  }, 8000);
 
-  if (isFacilitator) {
-    if (lastLine.includes("こんにちは") || lastLine.includes("はじめまして") || lastLine.includes("よろしく")) {
-      return "おう、いらっしゃい！せっかく同じテーブルになったし、普段どのあたりの海によく行くのか、あるいは今度行ってみたいポイントがあるか、お互いに話してみてよ！";
-    }
-    if (lastLine.includes("湘南") || lastLine.includes("千葉") || lastLine.includes("海") || lastLine.includes("波")) {
-      return "いいねぇ、海のエリアの話が出ると一気にイメージが湧くね！朝イチでサクッと入って、帰りに美味しいコーヒーでも飲むプランなんてどう？";
-    }
-    return "いい流れだね！久しぶりの海だと最初はパドルや波待ちだけでも十分気持ちいいし、お互い無理のないペースでタイミングを合わせてみてよ。どうかな？";
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data?.error?.message || `HTTP ${response.status}`);
   }
-
-  if (lastLine.includes("ボード") || lastLine.includes("浮力") || lastLine.includes("道具") || lastLine.includes("ギア")) {
-    return "ブランク明けなら、昔乗っていたショートボードよりもしっかり浮力のあるミッドレングス（7フィート前後）や、最近の進化したソフトボードが断然おすすめだよ！パドルも驚くほどラクになるし、波に乗れる本数が一気に増えて海がもっと楽しくなるはずさ。";
-  }
-  if (lastLine.includes("体力") || lastLine.includes("パドル") || lastLine.includes("筋トレ") || lastLine.includes("ストレッチ")) {
-    return "久しぶりの海なら、最初からガツガツ漕ごうとせず「まずは海に入って波待ちするだけ」くらいの気持ちで十分だよ！陸では肩甲骨まわりと股関節のストレッチを少しやっておくだけで、当日の体の軽さがぜんぜん違うからね。";
-  }
-  if (lastLine.includes("ポイント") || lastLine.includes("湘南") || lastLine.includes("千葉") || lastLine.includes("場所")) {
-    return "復帰の1回目は、ピークが分散していて遠浅なビーチブレイクが一番安心だね。鵠沼や太東みたいにメローな波質の場所を選んで、まずは風の弱い時間帯にゆったり入るのがおすすめだよ！";
-  }
-  return "なるほどね、その気持ちよく分かるよ！久しぶりの海は誰だって少し緊張するけど、一度海に浮かんでしまえば昔の感覚が自然と戻ってくるもんさ。ほかに道具やポイントのことで気になることがあれば、なんでも気軽に聞いてくれよな！";
+  const replyText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (replyText) return replyText;
+  throw new Error("Empty response");
 }
 
 async function generateMasterReply(systemPrompt, conversationText) {
   const rawKey = import.meta.env.VITE_GEMINI_API_KEY;
   if (!rawKey) {
-    return buildFallbackMasterReply(systemPrompt, conversationText);
+    throw new Error("VITE_GEMINI_API_KEY is not set");
   }
   const apiKey = rawKey.trim();
-  const modelsToTry = ["gemini-3.8-flash", "gemini-2.5-flash"];
 
-  for (const modelName of modelsToTry) {
+  // 1. 3.8系モデルの自動リトライ＆別モデルへの迂回
+  const primaryAttempts = [
+    { model: "gemini-3.8-flash", delay: 0 },
+    { model: "gemini-3.8-flash-lite", delay: 300 },
+    { model: "gemini-3.8-flash", delay: 1000 },
+    { model: "gemini-3.8-pro", delay: 300 },
+    { model: "gemini-3.8-flash", delay: 1500 }
+  ];
+
+  let lastError = null;
+
+  for (const item of primaryAttempts) {
+    if (item.delay > 0) {
+      await new Promise(r => setTimeout(r, item.delay));
+    }
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(apiKey)}`;
-      const response = await fetchWithTimeout(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemPrompt }] },
-          contents: [{ role: "user", parts: [{ text: conversationText }] }]
-        })
-      }, 7000);
-
-      const data = await response.json();
-      if (response.ok) {
-        const replyText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-        if (replyText) return replyText;
-      }
+      return await callGeminiModel(item.model, apiKey, systemPrompt, conversationText);
     } catch (err) {
-      console.warn(`Model ${modelName} timed out or failed:`, err.message);
+      console.warn(`Attempt ${item.model} failed:`, err.message);
+      lastError = err;
     }
   }
 
-  return buildFallbackMasterReply(systemPrompt, conversationText);
+  // 2. 上記がすべて混雑している場合、現在有効なモデル一覧をAPIから自動取得して試行
+  try {
+    const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`;
+    const listRes = await fetchWithTimeout(listUrl, { method: "GET" }, 5000);
+    const listData = await listRes.json();
+    const availableModels = (listData?.models || [])
+      .filter(m =>
+        m.supportedGenerationMethods?.includes("generateContent") &&
+        m.name?.includes("gemini") &&
+        !m.name.includes("1.5") &&
+        !m.name.includes("2.0") &&
+        !m.name.includes("2.5") &&
+        !m.name.includes("embedding") &&
+        !m.name.includes("imagen") &&
+        !m.name.includes("veo") &&
+        !m.name.includes("tts")
+      )
+      .map(m => m.name);
+
+    for (const dynModel of availableModels) {
+      try {
+        return await callGeminiModel(dynModel, apiKey, systemPrompt, conversationText);
+      } catch (err) {
+        lastError = err;
+      }
+    }
+  } catch (listErr) {
+    console.warn("ListModels fallback failed:", listErr.message);
+  }
+
+  throw lastError || new Error("AIサーバーが混雑しています。少し待ってから再送信してください。");
 }
 
 // --- Data Constants ---
