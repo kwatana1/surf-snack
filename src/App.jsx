@@ -30,12 +30,23 @@ async function generateMasterReply(systemPrompt, conversationText) {
     throw new Error("Vercelの環境変数 VITE_GEMINI_API_KEY が設定されていません");
   }
   const apiKey = rawKey.trim();
-  const modelsToTry = ["gemini-3.8-flash", "gemini-2.5-flash"];
+
+  // 混雑時に自動で時間を空けて再試行しつつ、3.8系の別モデルへもフォールバックするリスト
+  const attempts = [
+    { model: "gemini-3.8-flash", delay: 0 },
+    { model: "gemini-3.8-flash", delay: 1500 },
+    { model: "gemini-3.8-flash-lite", delay: 500 },
+    { model: "gemini-3.8-pro", delay: 500 },
+    { model: "gemini-3.8-flash", delay: 2500 }
+  ];
   const errors = [];
 
-  for (const modelName of modelsToTry) {
+  for (const item of attempts) {
+    if (item.delay > 0) {
+      await new Promise(r => setTimeout(r, item.delay));
+    }
     try {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(apiKey)}`;
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${item.model}:generateContent?key=${encodeURIComponent(apiKey)}`;
       const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -52,10 +63,11 @@ async function generateMasterReply(systemPrompt, conversationText) {
       if (replyText) return replyText;
       throw new Error("Empty response");
     } catch (err) {
-      errors.push(`[${modelName}: ${err.message}]`);
+      console.warn(`Attempt ${item.model} failed:`, err.message);
+      errors.push(`[${item.model}: ${err.message}]`);
     }
   }
-  throw new Error(errors.join(" / "));
+  throw new Error(errors[0]);
 }
 
 // --- Data Constants ---
