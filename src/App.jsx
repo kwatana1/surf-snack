@@ -2,8 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, deleteDoc, collection, onSnapshot, addDoc, updateDoc, arrayUnion, query, orderBy, limit, serverTimestamp } from 'firebase/firestore';
-import { GoogleGenerativeAI } from '@google/generative-ai';
-import { Wine, Waves, Users, MessageSquare, User, ChevronRight, Send, Loader2, Sparkles, Coffee, MapPin, Compass, Plus, Calendar, Info, CheckCircle2, Edit3, Trash2, LogOut } from 'lucide-react';
+import { Wine, Waves, Users, MessageSquare, ChevronRight, Send, Loader2, Sparkles, Compass, MapPin, Plus, Calendar, Info, CheckCircle2, Edit3, Trash2, LogOut } from 'lucide-react';
 
 // --- Firebase Configuration ---
 const firebaseConfig = {
@@ -15,23 +14,20 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
-let app, auth, db, genAI;
+let app, auth, db;
 try {
   app = initializeApp(firebaseConfig);
   auth = getAuth(app);
   db = getFirestore(app);
-  if (import.meta.env.VITE_GEMINI_API_KEY) {
-    genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
-  }
 } catch (e) {
-  console.error("Firebase/Gemini initialization error", e);
+  console.error("Firebase initialization error", e);
 }
 
 // --- Gemini API 共通呼び出し関数（AQ.新形式キー ＆ 従来キー両対応） ---
 async function generateMasterReply(systemPrompt, conversationText) {
   const rawKey = import.meta.env.VITE_GEMINI_API_KEY;
   if (!rawKey) {
-    throw new Error("VITE_GEMINI_API_KEY が設定されていません（VercelでRedeployしてください）");
+    throw new Error("Vercelの VITE_GEMINI_API_KEY が読み込めていません（VercelでRedeployしてください）");
   }
   const apiKey = rawKey.trim();
   const modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash'];
@@ -39,7 +35,6 @@ async function generateMasterReply(systemPrompt, conversationText) {
 
   for (const modelName of modelsToTry) {
     try {
-      // AQ.形式の認証キーはURLパラメータに混ぜず x-goog-api-key ヘッダー単独で送信する
       const baseUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`;
       const url = apiKey.startsWith('AIza') ? `${baseUrl}?key=${encodeURIComponent(apiKey)}` : baseUrl;
 
@@ -76,7 +71,6 @@ async function generateMasterReply(systemPrompt, conversationText) {
     }
   }
   throw lastError;
-}
 }
 
 // --- Data Constants ---
@@ -133,7 +127,6 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // 自分のデータを消して退店（初期画面へ戻る）
   const handleLeaveSnack = async () => {
     if (!user) return;
     if (!window.confirm("スナックから退店（あなたの待機データを削除）しますか？\n※いつでも再入店できます。")) return;
@@ -219,7 +212,7 @@ function WelcomeScreen({ onNext }) {
 }
 
 // ==========================================
-// Karte Screen (新規登録 ＆ 編集対応)
+// Karte Screen
 // ==========================================
 function KarteScreen({ user, initialData, onComplete, onCancel }) {
   const [loading, setLoading] = useState(false);
@@ -381,7 +374,7 @@ function KarteScreen({ user, initialData, onComplete, onCancel }) {
 // Main Layout (Bottom Navigation)
 // ==========================================
 function MainLayout({ karte, user, onEditKarte, onLeaveSnack }) {
-  const [activeTab, setActiveTab] = useState('lobby'); // lobby, consult, resurf
+  const [activeTab, setActiveTab] = useState('lobby');
   const [chatPartner, setChatPartner] = useState(null);
 
   if (chatPartner) {
@@ -430,7 +423,7 @@ function NavButton({ active, onClick, icon, label }) {
 }
 
 // ==========================================
-// Tab 1: Lobby (カルテ変更・退店・待機メンバー削除対応)
+// Tab 1: Lobby
 // ==========================================
 function LobbyTab({ karte, onSelectPartner, onEditKarte, onLeaveSnack }) {
   const [users, setUsers] = useState([]);
@@ -450,7 +443,6 @@ function LobbyTab({ karte, onSelectPartner, onEditKarte, onLeaveSnack }) {
     return () => unsubscribe();
   }, [karte.nickname]);
 
-  // 待機中の他メンバーを削除する処理
   const handleDeleteMember = async (memberId, memberName) => {
     if (!window.confirm(`待機メンバー「${memberName}」さんをリストから削除しますか？`)) return;
     try {
@@ -474,7 +466,6 @@ function LobbyTab({ karte, onSelectPartner, onEditKarte, onLeaveSnack }) {
         </span>
       </div>
 
-      {/* 自分のステータスカード（カルテ編集 ＆ 退店ボタン付き） */}
       <div className="bg-stone-900/90 border border-stone-700 p-3.5 rounded-2xl shadow-md">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center space-x-2">
@@ -508,7 +499,6 @@ function LobbyTab({ karte, onSelectPartner, onEditKarte, onLeaveSnack }) {
         </div>
       </div>
       
-      {/* オープン相席ラウンジ（全員参加のLINEグループ） */}
       <div className="bg-gradient-to-r from-teal-950/70 to-stone-900 border border-teal-500/40 p-4 rounded-2xl shadow-lg">
         <div className="flex justify-between items-center">
           <div>
@@ -582,7 +572,7 @@ function LobbyTab({ karte, onSelectPartner, onEditKarte, onLeaveSnack }) {
 }
 
 // ==========================================
-// Tab 2: Consult (なんでも相談 - AI 1対1相談＆入力欄常時表示)
+// Tab 2: Consult (なんでも相談)
 // ==========================================
 function ConsultTab({ karte }) {
   const [messages, setMessages] = useState([
@@ -799,6 +789,12 @@ function AisekiGroupChatScreen({ karte, partner, onBack }) {
         });
       } catch (err) {
         console.error("Facilitator AI Error:", err);
+        await addDoc(msgRef, {
+          sender: 'マスター',
+          isMaster: true,
+          text: `ごめん、通信エラーが出ちゃった！（原因: ${err.message}）`,
+          createdAt: serverTimestamp()
+        });
       } finally {
         setLoading(false);
       }
