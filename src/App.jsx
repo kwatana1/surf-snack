@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, deleteDoc, collection, onSnapshot, addDoc, updateDoc, arrayUnion, query, orderBy, limit, serverTimestamp } from 'firebase/firestore';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 import { Wine, Waves, Users, MessageSquare, ChevronRight, Send, Loader2, Sparkles, Compass, MapPin, Plus, Calendar, Info, CheckCircle2, Edit3, Trash2, LogOut } from 'lucide-react';
 
 // --- Firebase Configuration ---
@@ -15,36 +14,66 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
-let app, auth, db, genAI;
+let app, auth, db;
 try {
   app = initializeApp(firebaseConfig);
   auth = getAuth(app);
   db = getFirestore(app);
-  if (import.meta.env.VITE_GEMINI_API_KEY) {
-    genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
-  }
 } catch (e) {
   console.error("Firebase initialization error", e);
 }
 
-// --- Gemini API 共通呼び出し関数（最新 gemini-2.5-flash 対応） ---
+// --- Gemini API 共通呼び出し関数（gemini-3.8-flash & AQキー直接通信対応版） ---
 async function generateMasterReply(systemPrompt, conversationText) {
-  if (!genAI) {
+  const rawKey = import.meta.env.VITE_GEMINI_API_KEY;
+  if (!rawKey) {
     throw new Error("VITE_GEMINI_API_KEY is not set");
   }
-  const modelsToTry = ['gemini-2.5-flash', 'gemini-1.5-flash'];
+  const apiKey = rawKey.trim();
+
+  // Googleサーバー推奨の gemini-3.8-flash を最優先し、フォールバックも用意
+  const modelsToTry = [
+    'gemini-3.8-flash',
+    'gemini-2.5-flash',
+    'gemini-2.0-flash'
+  ];
   let lastError = null;
 
   for (const modelName of modelsToTry) {
     try {
-      const model = genAI.getGenerativeModel({
-        model: modelName,
-        systemInstruction: systemPrompt
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(apiKey)}`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey
+        },
+        body: JSON.stringify({
+          systemInstruction: {
+            parts: [{ text: systemPrompt }]
+          },
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: conversationText }]
+            }
+          ]
+        })
       });
-      const result = await model.generateContent(conversationText);
-      return result.response.text();
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data?.error?.message || `HTTP ${response.status}`);
+      }
+
+      const replyText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (replyText) {
+        return replyText;
+      }
+      throw new Error("Empty response from Gemini API");
     } catch (err) {
-      console.warn(`Model ${modelName} failed:`, err);
+      console.warn(`Model ${modelName} failed:`, err.message);
       lastError = err;
     }
   }
