@@ -27,57 +27,35 @@ try {
 async function generateMasterReply(systemPrompt, conversationText) {
   const rawKey = import.meta.env.VITE_GEMINI_API_KEY;
   if (!rawKey) {
-    throw new Error("VITE_GEMINI_API_KEY is not set");
+    throw new Error("Vercelの環境変数 VITE_GEMINI_API_KEY が設定されていません");
   }
   const apiKey = rawKey.trim();
-
-  // Googleサーバー推奨の gemini-3.8-flash を最優先し、フォールバックも用意
-  const modelsToTry = [
-    'gemini-3.8-flash',
-    'gemini-2.5-flash',
-    'gemini-2.0-flash'
-  ];
-  let lastError = null;
+  const modelsToTry = ["gemini-3.8-flash", "gemini-2.5-flash"];
+  const errors = [];
 
   for (const modelName of modelsToTry) {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${encodeURIComponent(apiKey)}`;
       const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-goog-api-key': apiKey
-        },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          systemInstruction: {
-            parts: [{ text: systemPrompt }]
-          },
-          contents: [
-            {
-              role: 'user',
-              parts: [{ text: conversationText }]
-            }
-          ]
+          systemInstruction: { parts: [{ text: systemPrompt }] },
+          contents: [{ role: "user", parts: [{ text: conversationText }] }]
         })
       });
-
       const data = await response.json();
-
       if (!response.ok) {
         throw new Error(data?.error?.message || `HTTP ${response.status}`);
       }
-
       const replyText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (replyText) {
-        return replyText;
-      }
-      throw new Error("Empty response from Gemini API");
+      if (replyText) return replyText;
+      throw new Error("Empty response");
     } catch (err) {
-      console.warn(`Model ${modelName} failed:`, err.message);
-      lastError = err;
+      errors.push(`[${modelName}: ${err.message}]`);
     }
   }
-  throw lastError;
+  throw new Error(errors.join(" / "));
 }
 
 // --- Data Constants ---
