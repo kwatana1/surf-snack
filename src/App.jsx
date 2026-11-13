@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, addDoc, updateDoc, arrayUnion, query, orderBy, serverTimestamp } from 'firebase/firestore';
+import { getFirestore, doc, setDoc, getDoc, collection, onSnapshot, addDoc, updateDoc, arrayUnion, query, orderBy, limit, serverTimestamp } from 'firebase/firestore';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { Wine, Waves, Users, MessageSquare, User, ChevronRight, Send, Loader2, Sparkles, Coffee, MapPin, Compass, Plus, Calendar, Info, CheckCircle2 } from 'lucide-react';
 
@@ -31,7 +31,7 @@ const PREFECTURES = [
 ];
 
 const SURF_POINTS = {
-  "おすすめ・こだわりなし": ["混雑の少ない穏やかな海ならどこでも", "まずは波待ち＆コーヒーだけでOKな場所"],
+  "おすすめ・こだわりなし": ["混雑の少ない穏やかな海ならどこでも", "まずは波待ちだけでOKな場所"],
   "神奈川（湘南・西湘・三浦）": ["湘南：鵠沼海岸（遠浅・メロー）", "湘南：辻堂海岸（広大・程よい波）", "湘南：茅ヶ崎パーク・チサン", "湘南：由比ヶ浜・材木座（穏やか）", "西湘：酒匂海岸・吉浜", "三浦：三浦海岸・城ヶ島"],
   "千葉北": ["千葉北：太東（ロング・リターン向き）", "千葉北：一宮・サンライズ", "千葉北：片貝海岸", "千葉北：御宿海岸", "千葉北：飯岡・椎名内"],
   "千葉南": ["千葉南：鴨川（マルキ・前原）", "千葉南：和田（白渚・J's前）", "千葉南：千倉海岸", "千葉南：平砂浦（南風かわす）"],
