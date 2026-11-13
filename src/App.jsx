@@ -27,28 +27,56 @@ try {
   console.error("Firebase/Gemini initialization error", e);
 }
 
-// --- Gemini API 共通呼び出し関数（フォールバック付き） ---
+// --- Gemini API 共通呼び出し関数（AQ.新形式キー ＆ 従来キー両対応） ---
 async function generateMasterReply(systemPrompt, conversationText) {
-  if (!genAI) {
-    throw new Error("VITE_GEMINI_API_KEY is not set");
+  const rawKey = import.meta.env.VITE_GEMINI_API_KEY;
+  if (!rawKey) {
+    throw new Error("VITE_GEMINI_API_KEY が設定されていません（VercelでRedeployしてください）");
   }
-  const modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+  const apiKey = rawKey.trim();
+  const modelsToTry = ['gemini-2.5-flash', 'gemini-2.0-flash'];
   let lastError = null;
 
   for (const modelName of modelsToTry) {
     try {
-      const model = genAI.getGenerativeModel({
-        model: modelName,
-        systemInstruction: systemPrompt
+      // AQ.形式の認証キーはURLパラメータに混ぜず x-goog-api-key ヘッダー単独で送信する
+      const baseUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent`;
+      const url = apiKey.startsWith('AIza') ? `${baseUrl}?key=${encodeURIComponent(apiKey)}` : baseUrl;
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey
+        },
+        body: JSON.stringify({
+          systemInstruction: {
+            parts: [{ text: systemPrompt }]
+          },
+          contents: [
+            {
+              role: 'user',
+              parts: [{ text: conversationText }]
+            }
+          ]
+        })
       });
-      const result = await model.generateContent(conversationText);
-      return result.response.text();
+
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.error?.message || `HTTP ${response.status}`);
+      }
+
+      const replyText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (replyText) return replyText;
+      throw new Error("空のレスポンスが返されました");
     } catch (err) {
       console.warn(`Model ${modelName} failed:`, err);
       lastError = err;
     }
   }
   throw lastError;
+}
 }
 
 // --- Data Constants ---
@@ -600,7 +628,7 @@ function ConsultTab({ karte }) {
       console.error("Consult Gemini API Error:", err);
       setMessages(prev => [
         ...prev,
-        { role: 'model', text: 'ごめん、ちょっと電波が悪くて聞き取れなかった！APIキーの設定を確認するか、もう一回話しかけてみてくれる？' }
+        { role: 'model', text: `ごめん、通信エラーが出ちゃった！（原因: ${err.message}）` }
       ]);
     } finally {
       setLoading(false);
