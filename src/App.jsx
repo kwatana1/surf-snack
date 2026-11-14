@@ -340,7 +340,7 @@ function KarteScreen({ user, initialData, onComplete, onCancel }) {
             <label className="text-xs text-teal-400 font-semibold block mb-2">年代</label>
             <select value={form.age} onChange={e => setForm({...form, age: e.target.value})} className="w-full bg-stone-900 border border-stone-700 text-white rounded-lg p-3 text-xs focus:border-teal-500">
               <option value="">選択</option>
-              {['30代','40代','50代','60代以上'].map(a => <option key={a} value={a}>{a}</option>)}
+              {['20代以下','30代','40代','50代','60代以上'].map(a => <option key={a} value={a}>{a}</option>)}
             </select>
           </div>
           <div className="flex-1">
